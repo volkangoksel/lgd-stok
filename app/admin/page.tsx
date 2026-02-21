@@ -1,25 +1,16 @@
 "use client"
-import { useState } from 'react'
-import { supabase } from '@/lib/supabase'
-import Image from 'next/image'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+import * as XLSX from 'xlsx'
 
 export default function AdminPage() {
-    const router = useRouter()
-
-  useEffect(() => {
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
-        router.push('/admin/login')
-      }
-    }
-    checkUser()
-  }, [router])
+  const router = useRouter()
+  const [authorized, setAuthorized] = useState(false)
   const [loading, setLoading] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
   const [imageFile, setImageFile] = useState<File | null>(null)
   
   const [formData, setFormData] = useState({
@@ -28,49 +19,118 @@ export default function AdminPage() {
     total_pcs: '1', price_per_carat: '', total_amount: '', image_url: ''
   })
 
+  // 1. GÜVENLİK KONTROLÜ (AUTH GUARD)
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        router.push('/admin/login')
+      } else {
+        setAuthorized(true)
+      }
+    }
+    checkUser()
+  }, [router])
+
+  // 2. FOTOĞRAF YÜKLEME FONKSİYONU
+  const uploadImage = async (file: File) => {
+    const fileExt = file.name.split('.').pop()
+    const fileName = `${formData.sku || Math.random()}-${Date.now()}.${fileExt}`
+    const { data, error } = await supabase.storage.from('stone-photos').upload(fileName, file)
+    if (error) throw error
+    const { data: { publicUrl } } = supabase.storage.from('stone-photos').getPublicUrl(fileName)
+    return publicUrl
+  }
+
+  // 3. MANUEL KAYIT
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    // Kayıt işlemleri buraya gelecek
-    setTimeout(() => { setLoading(false); alert("Saved!"); }, 1000)
+    try {
+      let finalImageUrl = formData.image_url
+      if (imageFile) {
+        finalImageUrl = await uploadImage(imageFile)
+      }
+      const { error } = await supabase.from('diamonds').insert([{ ...formData, image_url: finalImageUrl }])
+      if (error) throw error
+      alert("Success: Stone added to inventory!")
+      setFormData({ ...formData, sku: '', carat: '', total_amount: '', image_url: '' })
+      setImageFile(null)
+    } catch (err: any) {
+      alert("Error: " + err.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  // Apple stili input sınıfları - Yüksek kontrast ve netlik
-  const inputClass = `w-full p-3 rounded-xl border transition-all text-sm outline-none ${
-    darkMode 
-    ? 'bg-[#1c1c1e] border-[#38383a] text-white focus:ring-1 focus:ring-blue-500' 
-    : 'bg-white border-[#d1d1d6] text-slate-800 shadow-sm focus:border-blue-500'
+  // 4. EXCEL YÜKLEME
+  const handleFileUpload = (e: any) => {
+    const file = e.target.files[0]
+    const reader = new FileReader()
+    reader.onload = async (evt) => {
+      setLoading(true)
+      try {
+        const bstr = evt.target?.result
+        const wb = XLSX.read(bstr, { type: 'binary' })
+        const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]])
+        const formattedData = data.map((item: any) => ({
+          sku: String(item["Stone ID"] || ""),
+          lab: item["Lab"] || "GLI",
+          shape: item["Shape"],
+          color: item["Color"],
+          clarity: item["Clarity"],
+          carat: item["Carat"],
+          length: item["Length"],
+          width: item["Width"],
+          height: item["Height"],
+          total_amount: item["Amount $"],
+          status: 'In Stock'
+        }))
+        const { error } = await supabase.from('diamonds').insert(formattedData)
+        if (error) throw error
+        alert(`${formattedData.length} stones imported successfully!`)
+      } catch (err: any) {
+        alert("Excel Error: " + err.message)
+      } finally {
+        setLoading(false)
+      }
+    }
+    reader.readAsBinaryString(file)
+  }
+
+  // 5. ÇIKIŞ YAPMA
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/admin/login')
+  }
+
+  const inputClass = `w-full p-2.5 rounded-xl border transition-all text-sm outline-none ${
+    darkMode ? 'bg-[#1c1c1e] border-[#38383a] text-white' : 'bg-white border-[#d1d1d6] text-slate-800 shadow-sm focus:border-blue-500'
   }`
+
+  if (!authorized) return <div className="h-screen flex items-center justify-center font-black opacity-10 uppercase tracking-[0.5em]">Verifying Access...</div>
 
   return (
     <div className={`${darkMode ? 'bg-black text-white' : 'bg-[#f5f5f7] text-[#1d1d1f]'} min-h-screen font-sans flex flex-col items-center justify-center p-6 transition-colors duration-500`}>
       
-      {/* Header Area */}
+      {/* Header */}
       <div className="w-full max-w-2xl flex justify-between items-end mb-6 px-2">
-        {/* LOGO: Boyutu korunmuş ve bozulması engellenmiş */}
         <div className="relative w-32 h-16">
-          <img 
-            src="/logo.png" 
-            alt="GLI Logo" 
-            className="w-full h-full object-contain object-left"
-            onError={(e) => {
-                (e.target as HTMLImageElement).src = "https://via.placeholder.com/150x50?text=GLI+LOGO"
-            }}
-          />
+          <img src="/logo.png" alt="GLI Logo" className="w-full h-full object-contain object-left" />
         </div>
-
-        {/* MODERN MINIMAL DARK MODE TOGGLE (Çerçevesiz) */}
-        <button 
-          onClick={() => setDarkMode(!darkMode)}
-          className="text-[10px] font-bold tracking-[0.2em] uppercase opacity-40 hover:opacity-100 transition-opacity pb-2"
-        >
-          {darkMode ? 'Switch to Light' : 'Switch to Dark'}
-        </button>
+        <div className="flex gap-4 items-center">
+            <button onClick={() => setDarkMode(!darkMode)} className="text-[10px] font-black tracking-[0.2em] uppercase opacity-40 hover:opacity-100 transition-opacity">
+            {darkMode ? 'Light' : 'Dark'}
+            </button>
+            <button onClick={handleLogout} className="text-[10px] font-black tracking-[0.2em] uppercase text-red-500 opacity-60 hover:opacity-100">
+            Logout
+            </button>
+        </div>
       </div>
 
-      {/* Main Container */}
+      {/* Main Entry Form */}
       <div className={`${darkMode ? 'bg-[#1c1c1e] border-[#38383a]' : 'bg-white border-transparent'} w-full max-w-2xl rounded-[2.5rem] shadow-2xl border p-10 transition-all`}>
-        <h2 className="text-2xl font-black mb-8 tracking-tight italic uppercase">Stone Entry</h2>
+        <h2 className="text-2xl font-black mb-8 tracking-tight italic uppercase text-left">Stone Entry</h2>
         
         <form onSubmit={handleManualSubmit} className="space-y-6 text-left">
           <div className="grid grid-cols-3 gap-6">
@@ -93,26 +153,21 @@ export default function AdminPage() {
                <div key={field}>
                 <label className="text-[10px] font-black uppercase opacity-40 mb-1.5 block tracking-widest ml-1">{field}</label>
                 <select className={inputClass} onChange={(e) => setFormData({...formData, [field]: e.target.value})}>
-                  {field === 'shape' && ['ROUND','PEAR','OVAL','EMERALD'].map(s => <option key={s}>{s}</option>)}
-                  {field === 'color' && ['D','E','F','G','H'].map(c => <option key={c}>{c}</option>)}
-                  {field === 'clarity' && ['IF','VVS1','VVS2','VS1','VS2'].map(c => <option key={c}>{c}</option>)}
+                  {field === 'shape' && ['ROUND','PEAR','OVAL','EMERALD','RADIANT','PRINCESS'].map(s => <option key={s}>{s}</option>)}
+                  {field === 'color' && ['D','E','F','G','H','I'].map(c => <option key={c}>{c}</option>)}
+                  {field === 'clarity' && ['IF','VVS1','VVS2','VS1','VS2','SI1'].map(c => <option key={c}>{c}</option>)}
                 </select>
                </div>
             ))}
           </div>
 
-          {/* Details Section */}
-          <div className="pt-4">
-            <button 
-              type="button" 
-              onClick={() => setShowDetails(!showDetails)} 
-              className="text-[10px] font-black text-blue-600 uppercase tracking-[0.15em] hover:opacity-60 transition-opacity"
-            >
-              {showDetails ? "− Hide Technical Details" : "+ Add Measurements & Photo"}
+          <div className="pt-2">
+            <button type="button" onClick={() => setShowDetails(!showDetails)} className="text-[10px] font-black text-blue-600 uppercase tracking-[0.15em] hover:opacity-60 transition-opacity">
+              {showDetails ? "− Hide Details" : "+ Add Measurements & Photo"}
             </button>
 
             {showDetails && (
-              <div className="mt-6 space-y-6 animate-in fade-in slide-in-from-top-2 duration-500">
+              <div className="mt-6 space-y-6 animate-in fade-in duration-500">
                 <div className="grid grid-cols-4 gap-4">
                    {['lab', 'length', 'width', 'height'].map(f => (
                      <div key={f}>
@@ -122,26 +177,45 @@ export default function AdminPage() {
                    ))}
                 </div>
 
-                {/* Sürükle Bırak Alanı - Daha Minimal */}
-                <div className={`border rounded-2xl p-8 text-center transition-all border-dashed ${
-                    darkMode ? 'border-[#38383a] bg-black/20' : 'border-[#d1d1d6] bg-[#f5f5f7]/50'
+                <div 
+                  onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+                  onDragLeave={() => setDragActive(false)}
+                  onDrop={(e) => { e.preventDefault(); setDragActive(false); if (e.dataTransfer.files[0]) setImageFile(e.dataTransfer.files[0]); }}
+                  className={`border rounded-2xl p-8 text-center transition-all border-dashed ${
+                    dragActive ? 'border-blue-500 bg-blue-50/10' : 'border-[#d1d1d6] dark:border-[#38383a]'
                   }`}
                 >
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">📸 Drag & Drop Stone Photo</p>
-                  <input type="file" id="photo" className="hidden" accept="image/*" />
-                  <label htmlFor="photo" className="text-[9px] font-black text-blue-600 uppercase cursor-pointer block mt-2 hover:underline">Select File</label>
+                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">
+                    {imageFile ? `✅ ${imageFile.name}` : "📸 Drag & Drop Stone Photo"}
+                  </p>
+                  <input type="file" id="photo" className="hidden" accept="image/*" onChange={e => e.target.files && setImageFile(e.target.files[0])} />
+                  <label htmlFor="photo" className="text-[9px] font-black text-blue-600 uppercase cursor-pointer block mt-2 hover:underline">Or Select File</label>
                 </div>
               </div>
             )}
           </div>
 
-          <button disabled={loading} className="w-full bg-blue-600 text-white p-4 rounded-2xl font-black uppercase text-[11px] tracking-[0.25em] shadow-lg shadow-blue-500/20 active:scale-[0.97] transition-all mt-4">
+          <button disabled={loading} className="w-full bg-blue-600 text-white p-4 rounded-2xl font-black uppercase text-[11px] tracking-[0.25em] shadow-lg shadow-blue-500/20 active:scale-[0.97] transition-all">
             {loading ? "Processing..." : "Save Stone to Inventory"}
           </button>
         </form>
       </div>
 
-      {/* Footer Text */}
+      {/* Excel Mini Panel */}
+      <div className={`mt-8 w-full max-w-2xl p-6 rounded-3xl border border-dashed ${darkMode ? 'border-[#38383a] bg-white/5' : 'border-slate-200 bg-white shadow-sm'} flex items-center justify-between`}>
+          <div className="flex items-center gap-4">
+            <span className="text-xl">📊</span>
+            <div className="text-left">
+              <h3 className="font-black text-[10px] uppercase tracking-widest">Bulk Import</h3>
+              <p className="text-[9px] opacity-40 italic">Upload excel spreadsheet</p>
+            </div>
+          </div>
+          <input type="file" id="excel" accept=".xlsx, .xls" className="hidden" onChange={handleFileUpload} />
+          <label htmlFor="excel" className="bg-slate-100 dark:bg-slate-800 px-5 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest cursor-pointer hover:bg-blue-600 hover:text-white transition-all">
+            Choose File
+          </label>
+      </div>
+
       <div className="mt-12 text-center max-w-sm px-6">
         <p className={`text-[11px] leading-relaxed italic font-medium opacity-30 ${darkMode ? 'text-white' : 'text-black'}`}>
           "At GLI, we are dedicated to providing accurate and reliable diamond grading and certification services."
