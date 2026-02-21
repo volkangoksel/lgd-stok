@@ -1,225 +1,29 @@
 "use client"
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import * as XLSX from 'xlsx'
+import { useRouter } from 'next/navigation'
 
-export default function AdminPage() {
+export default function AdminLogin() {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const router = useRouter()
-  const [authorized, setAuthorized] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [showDetails, setShowDetails] = useState(false)
-  const [darkMode, setDarkMode] = useState(false)
-  const [dragActive, setDragActive] = useState(false)
-  const [imageFile, setImageFile] = useState<File | null>(null)
-  
-  const [formData, setFormData] = useState({
-    sku: '', lab: 'GLI', shape: 'ROUND', color: 'F', clarity: 'VS2', 
-    type: 'CVD', carat: '', length: '', width: '', height: '', 
-    total_pcs: '1', price_per_carat: '', total_amount: '', image_url: ''
-  })
 
-  // 1. GÜVENLİK KONTROLÜ (AUTH GUARD)
-  useEffect(() => {
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
-        router.push('/admin/login')
-      } else {
-        setAuthorized(true)
-      }
-    }
-    checkUser()
-  }, [router])
-
-  // 2. FOTOĞRAF YÜKLEME FONKSİYONU
-  const uploadImage = async (file: File) => {
-    const fileExt = file.name.split('.').pop()
-    const fileName = `${formData.sku || Math.random()}-${Date.now()}.${fileExt}`
-    const { data, error } = await supabase.storage.from('stone-photos').upload(fileName, file)
-    if (error) throw error
-    const { data: { publicUrl } } = supabase.storage.from('stone-photos').getPublicUrl(fileName)
-    return publicUrl
-  }
-
-  // 3. MANUEL KAYIT
-  const handleManualSubmit = async (e: React.FormEvent) => {
+  const handleLogin = async (e: any) => {
     e.preventDefault()
-    setLoading(true)
-    try {
-      let finalImageUrl = formData.image_url
-      if (imageFile) {
-        finalImageUrl = await uploadImage(imageFile)
-      }
-      const { error } = await supabase.from('diamonds').insert([{ ...formData, image_url: finalImageUrl }])
-      if (error) throw error
-      alert("Success: Stone added to inventory!")
-      setFormData({ ...formData, sku: '', carat: '', total_amount: '', image_url: '' })
-      setImageFile(null)
-    } catch (err: any) {
-      alert("Error: " + err.message)
-    } finally {
-      setLoading(false)
-    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) alert(error.message)
+    else router.push('/admin')
   }
-
-  // 4. EXCEL YÜKLEME
-  const handleFileUpload = (e: any) => {
-    const file = e.target.files[0]
-    const reader = new FileReader()
-    reader.onload = async (evt) => {
-      setLoading(true)
-      try {
-        const bstr = evt.target?.result
-        const wb = XLSX.read(bstr, { type: 'binary' })
-        const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]])
-        const formattedData = data.map((item: any) => ({
-          sku: String(item["Stone ID"] || ""),
-          lab: item["Lab"] || "GLI",
-          shape: item["Shape"],
-          color: item["Color"],
-          clarity: item["Clarity"],
-          carat: item["Carat"],
-          length: item["Length"],
-          width: item["Width"],
-          height: item["Height"],
-          total_amount: item["Amount $"],
-          status: 'In Stock'
-        }))
-        const { error } = await supabase.from('diamonds').insert(formattedData)
-        if (error) throw error
-        alert(`${formattedData.length} stones imported successfully!`)
-      } catch (err: any) {
-        alert("Excel Error: " + err.message)
-      } finally {
-        setLoading(false)
-      }
-    }
-    reader.readAsBinaryString(file)
-  }
-
-  // 5. ÇIKIŞ YAPMA
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push('/admin/login')
-  }
-
-  const inputClass = `w-full p-2.5 rounded-xl border transition-all text-sm outline-none ${
-    darkMode ? 'bg-[#1c1c1e] border-[#38383a] text-white' : 'bg-white border-[#d1d1d6] text-slate-800 shadow-sm focus:border-blue-500'
-  }`
-
-  if (!authorized) return <div className="h-screen flex items-center justify-center font-black opacity-10 uppercase tracking-[0.5em]">Verifying Access...</div>
 
   return (
-    <div className={`${darkMode ? 'bg-black text-white' : 'bg-[#f5f5f7] text-[#1d1d1f]'} min-h-screen font-sans flex flex-col items-center justify-center p-6 transition-colors duration-500`}>
-      
-      {/* Header */}
-      <div className="w-full max-w-2xl flex justify-between items-end mb-6 px-2">
-        <div className="relative w-32 h-16">
-          <img src="/logo.png" alt="GLI Logo" className="w-full h-full object-contain object-left" />
-        </div>
-        <div className="flex gap-4 items-center">
-            <button onClick={() => setDarkMode(!darkMode)} className="text-[10px] font-black tracking-[0.2em] uppercase opacity-40 hover:opacity-100 transition-opacity">
-            {darkMode ? 'Light' : 'Dark'}
-            </button>
-            <button onClick={handleLogout} className="text-[10px] font-black tracking-[0.2em] uppercase text-red-500 opacity-60 hover:opacity-100">
-            Logout
-            </button>
-        </div>
-      </div>
-
-      {/* Main Entry Form */}
-      <div className={`${darkMode ? 'bg-[#1c1c1e] border-[#38383a]' : 'bg-white border-transparent'} w-full max-w-2xl rounded-[2.5rem] shadow-2xl border p-10 transition-all`}>
-        <h2 className="text-2xl font-black mb-8 tracking-tight italic uppercase text-left">Stone Entry</h2>
-        
-        <form onSubmit={handleManualSubmit} className="space-y-6 text-left">
-          <div className="grid grid-cols-3 gap-6">
-            <div>
-              <label className="text-[10px] font-black uppercase opacity-40 mb-1.5 block tracking-widest ml-1">Stone ID</label>
-              <input required className={inputClass} placeholder="ID..." value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} />
-            </div>
-            <div>
-              <label className="text-[10px] font-black uppercase opacity-40 mb-1.5 block tracking-widest ml-1">Carat</label>
-              <input required type="number" step="0.01" className={inputClass} placeholder="0.00" value={formData.carat} onChange={e => setFormData({...formData, carat: e.target.value})} />
-            </div>
-            <div>
-              <label className="text-[10px] font-black uppercase opacity-40 mb-1.5 block tracking-widest ml-1">Amount $</label>
-              <input required type="number" className={`${inputClass} font-bold text-blue-500`} placeholder="0" value={formData.total_amount} onChange={e => setFormData({...formData, total_amount: e.target.value})} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-6">
-            {['shape', 'color', 'clarity'].map((field) => (
-               <div key={field}>
-                <label className="text-[10px] font-black uppercase opacity-40 mb-1.5 block tracking-widest ml-1">{field}</label>
-                <select className={inputClass} onChange={(e) => setFormData({...formData, [field]: e.target.value})}>
-                  {field === 'shape' && ['ROUND','PEAR','OVAL','EMERALD','RADIANT','PRINCESS'].map(s => <option key={s}>{s}</option>)}
-                  {field === 'color' && ['D','E','F','G','H','I'].map(c => <option key={c}>{c}</option>)}
-                  {field === 'clarity' && ['IF','VVS1','VVS2','VS1','VS2','SI1'].map(c => <option key={c}>{c}</option>)}
-                </select>
-               </div>
-            ))}
-          </div>
-
-          <div className="pt-2">
-            <button type="button" onClick={() => setShowDetails(!showDetails)} className="text-[10px] font-black text-blue-600 uppercase tracking-[0.15em] hover:opacity-60 transition-opacity">
-              {showDetails ? "− Hide Details" : "+ Add Measurements & Photo"}
-            </button>
-
-            {showDetails && (
-              <div className="mt-6 space-y-6 animate-in fade-in duration-500">
-                <div className="grid grid-cols-4 gap-4">
-                   {['lab', 'length', 'width', 'height'].map(f => (
-                     <div key={f}>
-                        <label className="text-[9px] font-bold uppercase opacity-30 mb-1 block tracking-widest ml-1">{f}</label>
-                        <input className={inputClass} placeholder="0.00" onChange={e => setFormData({...formData, [f]: e.target.value})} />
-                     </div>
-                   ))}
-                </div>
-
-                <div 
-                  onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-                  onDragLeave={() => setDragActive(false)}
-                  onDrop={(e) => { e.preventDefault(); setDragActive(false); if (e.dataTransfer.files[0]) setImageFile(e.dataTransfer.files[0]); }}
-                  className={`border rounded-2xl p-8 text-center transition-all border-dashed ${
-                    dragActive ? 'border-blue-500 bg-blue-50/10' : 'border-[#d1d1d6] dark:border-[#38383a]'
-                  }`}
-                >
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">
-                    {imageFile ? `✅ ${imageFile.name}` : "📸 Drag & Drop Stone Photo"}
-                  </p>
-                  <input type="file" id="photo" className="hidden" accept="image/*" onChange={e => e.target.files && setImageFile(e.target.files[0])} />
-                  <label htmlFor="photo" className="text-[9px] font-black text-blue-600 uppercase cursor-pointer block mt-2 hover:underline">Or Select File</label>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <button disabled={loading} className="w-full bg-blue-600 text-white p-4 rounded-2xl font-black uppercase text-[11px] tracking-[0.25em] shadow-lg shadow-blue-500/20 active:scale-[0.97] transition-all">
-            {loading ? "Processing..." : "Save Stone to Inventory"}
-          </button>
+    <div className="h-screen bg-[#F5F5F7] flex items-center justify-center p-6 text-center">
+      <div className="w-full max-w-sm bg-white p-12 rounded-[2.5rem] shadow-2xl">
+        <h1 className="text-xl font-black uppercase italic mb-8">Admin Access</h1>
+        <form onSubmit={handleLogin} className="space-y-4">
+          <input type="email" placeholder="Email" className="w-full p-4 rounded-2xl border bg-[#F5F5F7]" onChange={(e) => setEmail(e.target.value)} />
+          <input type="password" placeholder="Password" className="w-full p-4 rounded-2xl border bg-[#F5F5F7]" onChange={(e) => setPassword(e.target.value)} />
+          <button className="w-full bg-blue-600 text-white p-4 rounded-2xl font-black uppercase">Login</button>
         </form>
-      </div>
-
-      {/* Excel Mini Panel */}
-      <div className={`mt-8 w-full max-w-2xl p-6 rounded-3xl border border-dashed ${darkMode ? 'border-[#38383a] bg-white/5' : 'border-slate-200 bg-white shadow-sm'} flex items-center justify-between`}>
-          <div className="flex items-center gap-4">
-            <span className="text-xl">📊</span>
-            <div className="text-left">
-              <h3 className="font-black text-[10px] uppercase tracking-widest">Bulk Import</h3>
-              <p className="text-[9px] opacity-40 italic">Upload excel spreadsheet</p>
-            </div>
-          </div>
-          <input type="file" id="excel" accept=".xlsx, .xls" className="hidden" onChange={handleFileUpload} />
-          <label htmlFor="excel" className="bg-slate-100 dark:bg-slate-800 px-5 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest cursor-pointer hover:bg-blue-600 hover:text-white transition-all">
-            Choose File
-          </label>
-      </div>
-
-      <div className="mt-12 text-center max-w-sm px-6">
-        <p className={`text-[11px] leading-relaxed italic font-medium opacity-30 ${darkMode ? 'text-white' : 'text-black'}`}>
-          "At GLI, we are dedicated to providing accurate and reliable diamond grading and certification services."
-        </p>
       </div>
     </div>
   )
