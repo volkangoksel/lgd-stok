@@ -1,5 +1,5 @@
 "use client"
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import * as XLSX from 'xlsx'
@@ -8,182 +8,191 @@ export default function AdminPage() {
   const router = useRouter()
   const [authorized, setAuthorized] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [showEntryForm, setShowEntryForm] = useState(false)
+  const [showSuccess, setShowSuccess] = useState(false) // Başarı Animasyonu
   const [inventory, setInventory] = useState<any[]>([])
   const [darkMode, setDarkMode] = useState(false)
   
+  // Arama ve Filtreleme State'leri
+  const [searchTerm, setSearchTerm] = useState('')
+  const [filterShape, setFilterShape] = useState('ALL')
+
   const [formData, setFormData] = useState({
-    sku: '', lab: 'GLI', shape: 'ROUND', color: 'F', clarity: 'VS2', 
-    carat: '', length: '', width: '', height: '', total_amount: '', image_url: '', status: 'In Stock'
+    sku: '', lab: 'GLI', shape: 'ROUND', color: 'D', clarity: 'IF', 
+    carat: '', total_amount: '', priority: '0', status: 'In Stock'
   })
 
-  useEffect(() => {
-    fetchInventory()
-  }, [])
+  useEffect(() => { fetchInventory() }, [])
 
   const fetchInventory = async () => {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) router.push('/admin/login')
     else {
       setAuthorized(true)
-      const { data } = await supabase.from('diamonds').select('*').order('created_at', { ascending: false })
+      const { data } = await supabase.from('diamonds').select('*').order('priority', { ascending: false })
       if (data) setInventory(data)
     }
   }
 
-  // Stok Durumu Güncelleme (Yayına al/kaldır)
-  const toggleStatus = async (id: string, currentStatus: string) => {
-    const newStatus = currentStatus === 'In Stock' ? 'Hidden' : 'In Stock'
-    const { error } = await supabase.from('diamonds').update({ status: newStatus }).eq('id', id)
-    if (!error) fetchInventory()
-  }
-
-  // Stok Silme
-  const deleteStone = async (id: string) => {
-    if (window.confirm("Are you sure you want to PERMANENTLY delete this stone?")) {
-      const { error } = await supabase.from('diamonds').delete().eq('id', id)
-      if (!error) fetchInventory()
-    }
-  }
-
+  // MANUEL KAYIT (SAVE) ÇALIŞTIRMA VE ANİMASYON
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    const { error } = await supabase.from('diamonds').upsert([{...formData, sku: formData.sku.trim().toUpperCase()}], { onConflict: 'sku' })
-    if (!error) {
-      alert("Saved!");
-      setFormData({ ...formData, sku: '', carat: '', total_amount: '', image_url: '' })
+    const { error } = await supabase.from('diamonds').upsert([
+      {...formData, sku: formData.sku.trim().toUpperCase(), carat: parseFloat(formData.carat), total_amount: parseFloat(formData.total_amount), priority: parseInt(formData.priority)}
+    ], { onConflict: 'sku' })
+    
+    setLoading(false)
+    if (error) alert("Error: " + error.message)
+    else {
+      setShowSuccess(true) // Animasyonu başlat
+      setTimeout(() => setShowSuccess(false), 3000) // 3 saniye sonra kapat
+      setFormData({ ...formData, sku: '', carat: '', total_amount: '' })
       fetchInventory()
     }
-    setLoading(false)
   }
 
-  const cleanNum = (val: any) => {
-    if (!val) return 0;
-    let s = String(val).replace(/\s/g, '').replace('$', '').replace(',', '.');
-    return parseFloat(s) || 0;
-  }
+  // TABLO FİLTRELEME MANTIĞI
+  const filteredInventory = useMemo(() => {
+    return inventory.filter(item => {
+      const matchSearch = item.sku.toLowerCase().includes(searchTerm.toLowerCase())
+      const matchShape = filterShape === 'ALL' || item.shape === filterShape
+      return matchSearch && matchShape
+    })
+  }, [inventory, searchTerm, filterShape])
 
-  const handleFileUpload = async (e: any) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setLoading(true);
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      const bstr = evt.target?.result;
-      const wb = XLSX.read(bstr, { type: 'binary' });
-      const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-      const processedData = data.map((item: any) => ({
-        sku: String(item["SKU"] || item["Stone ID"] || "").trim().toUpperCase(),
-        image_url: String(item["Photo link"] || item["Photo"] || ""),
-        lab: String(item["Sertificate"] || item["Lab"] || "GLI").toUpperCase(),
-        carat: cleanNum(item["Carat"]),
-        color: String(item["Color"] || "").toUpperCase(),
-        clarity: String(item["Clarity"] || "").toUpperCase(),
-        shape: String(item["Shape"] || "").toUpperCase(),
-        total_amount: cleanNum(item["Price"]),
-        status: 'In Stock'
-      }));
-      await supabase.from('diamonds').upsert(processedData, { onConflict: 'sku' });
-      alert("Inventory Sync Complete!");
-      fetchInventory();
-      setLoading(false);
+  const deleteStone = async (id: string) => {
+    if (window.confirm("Delete this stone?")) {
+      await supabase.from('diamonds').delete().eq('id', id)
+      fetchInventory()
     }
-    reader.readAsBinaryString(file);
   }
 
   if (!authorized) return null
 
-  return (
-    <div className={`${darkMode ? 'bg-black text-white' : 'bg-[#F5F5F7] text-[#1d1d1f]'} min-h-screen font-sans p-4 md:p-8 transition-colors duration-500`}>
-      
-      {/* 1. TOP NAV & KPI */}
-      <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-6">
-        <div>
-          <img src="/logo.png" alt="GLI Logo" className="w-24 h-12 object-contain mb-2" />
-          <h1 className="text-sm font-black opacity-30 tracking-[0.3em] uppercase italic">Inventory Manager V2.0</h1>
-        </div>
-        
-        <div className="flex gap-4">
-          <div className="bg-white dark:bg-[#1c1c1e] px-6 py-3 rounded-2xl shadow-sm border border-black/5">
-            <p className="text-[10px] font-bold opacity-40 uppercase">Total Stones</p>
-            <p className="text-xl font-black text-blue-600 italic">{inventory.length}</p>
-          </div>
-          <div className="bg-white dark:bg-[#1c1c1e] px-6 py-3 rounded-2xl shadow-sm border border-black/5">
-            <p className="text-[10px] font-bold opacity-40 uppercase">Live in Catalog</p>
-            <p className="text-xl font-black text-green-500 italic">{inventory.filter(i => i.status === 'In Stock').length}</p>
-          </div>
-          <button onClick={() => setShowEntryForm(!showEntryForm)} className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-blue-500/20 active:scale-95 transition-all">
-            {showEntryForm ? "Close Form" : "Add New Stone"}
-          </button>
-        </div>
-      </div>
+  const inputClass = `w-full p-3 rounded-xl border transition-all text-sm outline-none dark:bg-black dark:border-white/10 dark:text-white`
 
-      {/* 2. COLLAPSIBLE ENTRY FORM */}
-      {showEntryForm && (
-        <div className="max-w-4xl mx-auto bg-white dark:bg-[#1c1c1e] p-8 rounded-[2.5rem] shadow-2xl mb-12 animate-in fade-in slide-in-from-top-4 duration-500">
-           <h2 className="text-xl font-black mb-6 italic underline decoration-blue-500">Fast Entry</h2>
-           <form onSubmit={handleManualSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <input className="p-3 rounded-xl border dark:bg-black dark:border-white/10 outline-none" placeholder="Stone ID" onChange={e => setFormData({...formData, sku: e.target.value})} />
-              <input type="number" step="0.01" className="p-3 rounded-xl border dark:bg-black dark:border-white/10 outline-none" placeholder="Carat" onChange={e => setFormData({...formData, carat: e.target.value})} />
-              <input type="number" className="p-3 rounded-xl border dark:bg-black dark:border-white/10 outline-none text-blue-600 font-bold" placeholder="Price $" onChange={e => setFormData({...formData, total_amount: e.target.value})} />
-              <div className="col-span-full flex gap-4">
-                <button type="submit" className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-black text-[10px] uppercase">Save to Database</button>
-                <input type="file" id="bulk" className="hidden" onChange={handleFileUpload} />
-                <label htmlFor="bulk" className="flex-1 bg-slate-100 dark:bg-white/5 py-3 rounded-xl font-black text-[10px] uppercase text-center cursor-pointer hover:bg-slate-200">Import Excel</label>
-              </div>
-           </form>
+  return (
+    <div className={`${darkMode ? 'bg-black' : 'bg-[#F5F5F7]'} min-h-screen font-sans p-4 md:p-10 transition-colors`}>
+      
+      {/* BAŞARI BİLDİRİMİ (TOAST ANİMASYONU) */}
+      {showSuccess && (
+        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[100] animate-bounce">
+          <div className="bg-green-500 text-white px-8 py-4 rounded-full shadow-2xl font-black flex items-center gap-3">
+            <span className="text-2xl">✅</span> STONE SAVED SUCCESSFULLY!
+          </div>
         </div>
       )}
 
-      {/* 3. INVENTORY TABLE (MÜŞTERİ GÖRÜNÜMÜNÜN ADMİN HALİ) */}
-      <div className="max-w-7xl mx-auto bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] shadow-sm border border-black/5 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50 dark:bg-black/40 text-[10px] font-black opacity-40 uppercase tracking-widest border-b border-black/5">
-                <th className="p-6">Photo</th>
-                <th className="p-6">Stone ID</th>
-                <th className="p-6">Specs</th>
-                <th className="p-6">Price</th>
-                <th className="p-6 text-center">Status</th>
-                <th className="p-6 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-black/5">
-              {inventory.map((stone) => (
-                <tr key={stone.id} className={`hover:bg-slate-50 dark:hover:bg-white/5 transition-colors ${stone.status === 'Hidden' ? 'opacity-40 grayscale' : ''}`}>
-                  <td className="p-6">
-                    <div className="w-12 h-12 bg-slate-100 dark:bg-black rounded-lg overflow-hidden flex items-center justify-center">
-                      {stone.image_url ? (
-                        <img src={stone.image_url} className="w-full h-full object-cover" onError={(e) => (e.currentTarget.src = "https://via.placeholder.com/50?text=Error")} />
-                      ) : (
-                        <span className="text-[10px] font-bold opacity-20">No Pix</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="p-6 font-black text-sm uppercase italic">{stone.sku}</td>
-                  <td className="p-6">
-                    <p className="text-xs font-bold">{stone.carat}CT {stone.shape}</p>
-                    <p className="text-[10px] opacity-40">{stone.color} / {stone.clarity} / {stone.lab}</p>
-                  </td>
-                  <td className="p-6 font-black text-blue-600 italic text-lg">${stone.total_amount}</td>
-                  <td className="p-6 text-center">
-                    <button onClick={() => toggleStatus(stone.id, stone.status)} className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter ${stone.status === 'In Stock' ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-500'}`}>
-                      {stone.status === 'In Stock' ? '● Public' : '○ Hidden'}
-                    </button>
-                  </td>
-                  <td className="p-6 text-right space-x-3">
-                    {stone.image_url && <a href={stone.image_url} target="_blank" className="text-blue-500 text-[10px] font-bold uppercase underline">Link</a>}
-                    <button onClick={() => deleteStone(stone.id)} className="text-red-500 text-[10px] font-black uppercase">Delete</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="max-w-7xl mx-auto">
+        {/* HEADER & KPI */}
+        <div className="flex justify-between items-center mb-10">
+          <img src="/logo.png" className="w-24 object-contain" />
+          <div className="flex gap-4">
+            <div className="bg-white dark:bg-[#1c1c1e] px-6 py-3 rounded-2xl shadow-sm border border-black/5 text-center">
+              <p className="text-[10px] font-black opacity-30 uppercase">In Stock</p>
+              <p className="text-xl font-black text-blue-600 italic">{inventory.length}</p>
+            </div>
+            <button onClick={() => setDarkMode(!darkMode)} className="p-4 bg-white dark:bg-white/5 rounded-2xl shadow-sm">
+                {darkMode ? '☀️' : '🌙'}
+            </button>
+          </div>
         </div>
-      </div>
 
+        {/* GENİŞLETİLMİŞ GİRİŞ FORMU */}
+        <div className="bg-white dark:bg-[#1c1c1e] p-10 rounded-[3rem] shadow-2xl mb-12 border border-black/5">
+          <h2 className="text-2xl font-black mb-8 italic uppercase tracking-tighter">Stone Registration</h2>
+          <form onSubmit={handleManualSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-6 text-left">
+            <div>
+              <label className="text-[10px] font-bold opacity-40 uppercase ml-1">Stone ID</label>
+              <input required className={inputClass} placeholder="SKU-101" value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold opacity-40 uppercase ml-1">Weight (CT)</label>
+              <input required type="number" step="0.01" className={inputClass} placeholder="1.00" value={formData.carat} onChange={e => setFormData({...formData, carat: e.target.value})} />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold opacity-40 uppercase ml-1">Price (USD)</label>
+              <input required type="number" className={`${inputClass} font-black text-blue-600`} placeholder="2500" value={formData.total_amount} onChange={e => setFormData({...formData, total_amount: e.target.value})} />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold opacity-40 uppercase ml-1 text-orange-500">Catalog Rank (High = First)</label>
+              <input type="number" className={inputClass} placeholder="0" value={formData.priority} onChange={e => setFormData({...formData, priority: e.target.value})} />
+            </div>
+
+            {/* Diğer Kriterler */}
+            {['shape', 'color', 'clarity'].map(f => (
+              <div key={f}>
+                <label className="text-[10px] font-bold opacity-40 uppercase ml-1">{f}</label>
+                <select className={inputClass} value={(formData as any)[f]} onChange={e => setFormData({...formData, [f]: e.target.value})}>
+                  {f === 'shape' && ['ROUND','PEAR','OVAL','EMERALD','RADIANT'].map(opt => <option key={opt}>{opt}</option>)}
+                  {f === 'color' && ['D','E','F','G','H','I'].map(opt => <option key={opt}>{opt}</option>)}
+                  {f === 'clarity' && ['IF','VVS1','VVS2','VS1','VS2','SI1'].map(opt => <option key={opt}>{opt}</option>)}
+                </select>
+              </div>
+            ))}
+
+            <div className="md:pt-5">
+              <button disabled={loading} className="w-full h-[50px] bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-500/30 active:scale-95 transition-all">
+                {loading ? "SAVING..." : "SAVE STONE"}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* STOK TAKİP VE FİLTRELEME ARAÇLARI */}
+        <div className="bg-white dark:bg-[#1c1c1e] rounded-[2.5rem] shadow-sm border border-black/5 overflow-hidden">
+          <div className="p-8 border-b border-black/5 flex flex-col md:flex-row justify-between gap-6">
+            <h3 className="font-black italic uppercase text-lg">Inventory Tracking</h3>
+            <div className="flex gap-4 flex-1 max-w-2xl">
+                <input 
+                  className="flex-1 bg-[#F5F5F7] dark:bg-black p-3 rounded-xl outline-none text-xs font-bold" 
+                  placeholder="Search by SKU..." 
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+                <select 
+                  className="bg-[#F5F5F7] dark:bg-black p-3 rounded-xl outline-none text-xs font-bold"
+                  onChange={(e) => setFilterShape(e.target.value)}
+                >
+                  <option value="ALL">All Shapes</option>
+                  <option value="ROUND">Round</option>
+                  <option value="PEAR">Pear</option>
+                  <option value="OVAL">Oval</option>
+                </select>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-black/20 text-[9px] font-black opacity-30 uppercase tracking-[0.2em] border-b border-black/5">
+                  <th className="p-6">SKU / Stone ID</th>
+                  <th className="p-6">Specifications</th>
+                  <th className="p-6">Price (USD)</th>
+                  <th className="p-6 text-center text-orange-500">Rank</th>
+                  <th className="p-6 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-black/5 dark:divide-white/5">
+                {filteredInventory.map((stone) => (
+                  <tr key={stone.id} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                    <td className="p-6 font-black text-sm italic">{stone.sku}</td>
+                    <td className="p-6">
+                      <p className="text-xs font-bold">{stone.carat}CT {stone.shape}</p>
+                      <p className="text-[10px] opacity-40">{stone.color} / {stone.clarity} / {stone.lab}</p>
+                    </td>
+                    <td className="p-6 font-black text-blue-600 italic text-lg">${stone.total_amount}</td>
+                    <td className="p-6 text-center font-bold text-orange-500">{stone.priority}</td>
+                    <td className="p-6 text-right">
+                      <button onClick={() => deleteStone(stone.id)} className="text-[10px] font-black uppercase text-red-500 hover:underline">Remove</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
     </div>
   )
 }
