@@ -1,225 +1,206 @@
 "use client"
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
-import * as XLSX from 'xlsx'
 
-export default function AdminPage() {
-  const router = useRouter()
-  const [authorized, setAuthorized] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [showDetails, setShowDetails] = useState(false)
+export default function KatalogPage() {
+  const [diamonds, setDiamonds] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   const [darkMode, setDarkMode] = useState(false)
-  const [dragActive, setDragActive] = useState(false)
-  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [density, setDensity] = useState(3) // 3 to 6 items per row
+  const [cart, setCart] = useState<any[]>([])
+  const [favorites, setFavorites] = useState<string[]>([])
   
-  const [formData, setFormData] = useState({
-    sku: '', lab: 'GLI', shape: 'ROUND', color: 'F', clarity: 'VS2', 
-    type: 'CVD', carat: '', length: '', width: '', height: '', 
-    total_pcs: '1', price_per_carat: '', total_amount: '', image_url: ''
+  // Advanced Filters
+  const [sortBy, setSortBy] = useState('price-low')
+  const [filters, setFilters] = useState<any>({
+    shape: 'NONE', minCarat: '', maxCarat: '',
+    minPrice: '', maxPrice: '', lab: 'NONE',
+    color: 'NONE', clarity: 'NONE', cut: 'NONE'
   })
 
-  // 1. GÜVENLİK KONTROLÜ (AUTH GUARD)
   useEffect(() => {
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
-        router.push('/admin/login')
-      } else {
-        setAuthorized(true)
-      }
-    }
-    checkUser()
-  }, [router])
-
-  // 2. FOTOĞRAF YÜKLEME FONKSİYONU
-  const uploadImage = async (file: File) => {
-    const fileExt = file.name.split('.').pop()
-    const fileName = `${formData.sku || Math.random()}-${Date.now()}.${fileExt}`
-    const { data, error } = await supabase.storage.from('stone-photos').upload(fileName, file)
-    if (error) throw error
-    const { data: { publicUrl } } = supabase.storage.from('stone-photos').getPublicUrl(fileName)
-    return publicUrl
-  }
-
-  // 3. MANUEL KAYIT
-  const handleManualSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    try {
-      let finalImageUrl = formData.image_url
-      if (imageFile) {
-        finalImageUrl = await uploadImage(imageFile)
-      }
-      const { error } = await supabase.from('diamonds').insert([{ ...formData, image_url: finalImageUrl }])
-      if (error) throw error
-      alert("Success: Stone added to inventory!")
-      setFormData({ ...formData, sku: '', carat: '', total_amount: '', image_url: '' })
-      setImageFile(null)
-    } catch (err: any) {
-      alert("Error: " + err.message)
-    } finally {
+    async function getDiamonds() {
+      const { data, error } = await supabase.from('diamonds').select('*').order('created_at', { ascending: false })
+      if (!error && data) setDiamonds(data)
       setLoading(false)
     }
+    getDiamonds()
+  }, [])
+
+  // Filter & Sort Logic
+  const processedDiamonds = useMemo(() => {
+    let result = diamonds.filter(d => {
+      return (filters.shape === 'NONE' || d.shape === filters.shape) &&
+             (filters.lab === 'NONE' || d.lab === filters.lab) &&
+             (filters.color === 'NONE' || d.color === filters.color) &&
+             (filters.clarity === 'NONE' || d.clarity === filters.clarity) &&
+             (filters.cut === 'NONE' || d.cut === filters.cut) &&
+             (filters.minCarat === '' || d.carat >= parseFloat(filters.minCarat)) &&
+             (filters.maxCarat === '' || d.carat <= parseFloat(filters.maxCarat)) &&
+             (filters.minPrice === '' || d.total_amount >= parseFloat(filters.minPrice)) &&
+             (filters.maxPrice === '' || d.total_amount <= parseFloat(filters.maxPrice))
+    })
+
+    if (sortBy === 'price-low') result.sort((a, b) => a.total_amount - b.total_amount)
+    if (sortBy === 'price-high') result.sort((a, b) => b.total_amount - a.total_amount)
+    if (sortBy === 'carat-low') result.sort((a, b) => a.carat - b.carat)
+    if (sortBy === 'carat-high') result.sort((a, b) => b.carat - a.carat)
+    return result
+  }, [diamonds, filters, sortBy])
+
+  const handleGetQuote = () => {
+    if (cart.length === 0) return alert("Select items first!")
+    const items = cart.map(d => `- ${d.sku} | ${d.carat}ct ${d.color}/${d.clarity}`).join('%0A')
+    window.open(`https://wa.me/905XXXXXXXXXX?text=I'm interested in:%0A${items}`, '_blank')
   }
 
-  // 4. EXCEL YÜKLEME
-  const handleFileUpload = (e: any) => {
-    const file = e.target.files[0]
-    const reader = new FileReader()
-    reader.onload = async (evt) => {
-      setLoading(true)
-      try {
-        const bstr = evt.target?.result
-        const wb = XLSX.read(bstr, { type: 'binary' })
-        const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]])
-        const formattedData = data.map((item: any) => ({
-          sku: String(item["Stone ID"] || ""),
-          lab: item["Lab"] || "GLI",
-          shape: item["Shape"],
-          color: item["Color"],
-          clarity: item["Clarity"],
-          carat: item["Carat"],
-          length: item["Length"],
-          width: item["Width"],
-          height: item["Height"],
-          total_amount: item["Amount $"],
-          status: 'In Stock'
-        }))
-        const { error } = await supabase.from('diamonds').insert(formattedData)
-        if (error) throw error
-        alert(`${formattedData.length} stones imported successfully!`)
-      } catch (err: any) {
-        alert("Excel Error: " + err.message)
-      } finally {
-        setLoading(false)
-      }
-    }
-    reader.readAsBinaryString(file)
-  }
+  const sectionLabel = "text-[9px] font-black opacity-30 uppercase tracking-[0.2em] block mb-3 mt-8"
+  const filterBtn = (field: string, val: string) => `px-2 py-1.5 rounded-md text-[9px] font-bold transition-all ${filters[field] === val ? 'bg-blue-600 text-white shadow-md' : 'bg-white dark:bg-white/5 opacity-60 hover:opacity-100'}`
 
-  // 5. ÇIKIŞ YAPMA
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push('/admin/login')
-  }
-
-  const inputClass = `w-full p-2.5 rounded-xl border transition-all text-sm outline-none ${
-    darkMode ? 'bg-[#1c1c1e] border-[#38383a] text-white' : 'bg-white border-[#d1d1d6] text-slate-800 shadow-sm focus:border-blue-500'
-  }`
-
-  if (!authorized) return <div className="h-screen flex items-center justify-center font-black opacity-10 uppercase tracking-[0.5em]">Verifying Access...</div>
+  if (loading) return <div className="h-screen flex items-center justify-center font-black opacity-10 tracking-[0.5em] text-2xl uppercase">Inventory Loading...</div>
 
   return (
-    <div className={`${darkMode ? 'bg-black text-white' : 'bg-[#f5f5f7] text-[#1d1d1f]'} min-h-screen font-sans flex flex-col items-center justify-center p-6 transition-colors duration-500`}>
+    <div className={`${darkMode ? 'bg-black text-white' : 'bg-[#F5F5F7] text-[#1d1d1f]'} min-h-screen font-sans transition-colors duration-500 text-left`}>
       
-      {/* Header */}
-      <div className="w-full max-w-2xl flex justify-between items-end mb-6 px-2">
-        <div className="relative w-32 h-16">
-          <img src="/logo.png" alt="GLI Logo" className="w-full h-full object-contain object-left" />
+      {/* NAVBAR */}
+      <nav className="p-6 flex justify-between items-center max-w-[1800px] mx-auto sticky top-0 z-50 backdrop-blur-xl bg-white/70 dark:bg-black/70 border-b border-black/5">
+        <img src="/logo.png" alt="GLI Logo" className="h-10 w-auto object-contain" />
+        <div className="flex items-center gap-8">
+            <button onClick={() => setDarkMode(!darkMode)} className="text-[10px] font-black uppercase opacity-40 italic">{darkMode ? 'Light' : 'Dark'}</button>
+            <div className="flex items-center gap-6">
+                <div className="relative opacity-80 text-lg cursor-pointer">❤️ <span className="absolute -top-2 -right-2 bg-red-500 text-[8px] text-white w-4 h-4 rounded-full flex items-center justify-center font-bold">{favorites.length}</span></div>
+                <button onClick={handleGetQuote} className="bg-blue-600 text-white px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-blue-500/20 active:scale-95 transition-all">
+                    Get Quote ({cart.length})
+                </button>
+            </div>
         </div>
-        <div className="flex gap-4 items-center">
-            <button onClick={() => setDarkMode(!darkMode)} className="text-[10px] font-black tracking-[0.2em] uppercase opacity-40 hover:opacity-100 transition-opacity">
-            {darkMode ? 'Light' : 'Dark'}
-            </button>
-            <button onClick={handleLogout} className="text-[10px] font-black tracking-[0.2em] uppercase text-red-500 opacity-60 hover:opacity-100">
-            Logout
-            </button>
-        </div>
-      </div>
+      </nav>
 
-      {/* Main Entry Form */}
-      <div className={`${darkMode ? 'bg-[#1c1c1e] border-[#38383a]' : 'bg-white border-transparent'} w-full max-w-2xl rounded-[2.5rem] shadow-2xl border p-10 transition-all`}>
-        <h2 className="text-2xl font-black mb-8 tracking-tight italic uppercase text-left">Stone Entry</h2>
+      <div className="max-w-[1800px] mx-auto flex px-8 py-10 gap-12">
         
-        <form onSubmit={handleManualSubmit} className="space-y-6 text-left">
-          <div className="grid grid-cols-3 gap-6">
-            <div>
-              <label className="text-[10px] font-black uppercase opacity-40 mb-1.5 block tracking-widest ml-1">Stone ID</label>
-              <input required className={inputClass} placeholder="ID..." value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} />
-            </div>
-            <div>
-              <label className="text-[10px] font-black uppercase opacity-40 mb-1.5 block tracking-widest ml-1">Carat</label>
-              <input required type="number" step="0.01" className={inputClass} placeholder="0.00" value={formData.carat} onChange={e => setFormData({...formData, carat: e.target.value})} />
-            </div>
-            <div>
-              <label className="text-[10px] font-black uppercase opacity-40 mb-1.5 block tracking-widest ml-1">Amount $</label>
-              <input required type="number" className={`${inputClass} font-bold text-blue-500`} placeholder="0" value={formData.total_amount} onChange={e => setFormData({...formData, total_amount: e.target.value})} />
-            </div>
-          </div>
+        {/* SIDEBAR */}
+        <aside className="w-64 flex-shrink-0 hidden xl:block sticky top-32 h-[calc(100vh-160px)] overflow-y-auto pr-4 scrollbar-hide pb-20">
+          <h2 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.3em] italic mb-2">Filters</h2>
 
-          <div className="grid grid-cols-3 gap-6">
-            {['shape', 'color', 'clarity'].map((field) => (
-               <div key={field}>
-                <label className="text-[10px] font-black uppercase opacity-40 mb-1.5 block tracking-widest ml-1">{field}</label>
-                <select className={inputClass} onChange={(e) => setFormData({...formData, [field]: e.target.value})}>
-                  {field === 'shape' && ['ROUND','PEAR','OVAL','EMERALD','RADIANT','PRINCESS'].map(s => <option key={s}>{s}</option>)}
-                  {field === 'color' && ['D','E','F','G','H','I'].map(c => <option key={c}>{c}</option>)}
-                  {field === 'clarity' && ['IF','VVS1','VVS2','VS1','VS2','SI1'].map(c => <option key={c}>{c}</option>)}
-                </select>
-               </div>
+          <label className={sectionLabel}>1. Shape</label>
+          <div className="grid grid-cols-2 gap-2">
+            {['NONE','ROUND','PEAR','OVAL','EMERALD','RADIANT','PRINCESS'].map(s => (
+              <button key={s} onClick={() => setFilters({...filters, shape: s})} className={filterBtn('shape', s)}>{s}</button>
             ))}
           </div>
 
-          <div className="pt-2">
-            <button type="button" onClick={() => setShowDetails(!showDetails)} className="text-[10px] font-black text-blue-600 uppercase tracking-[0.15em] hover:opacity-60 transition-opacity">
-              {showDetails ? "− Hide Details" : "+ Add Measurements & Photo"}
-            </button>
+          <label className={sectionLabel}>2. Carat Range</label>
+          <div className="flex gap-2">
+            <input type="number" placeholder="Min" className="w-1/2 bg-white dark:bg-white/5 p-2 rounded-lg text-[10px] font-bold border border-black/5 outline-none" onChange={e => setFilters({...filters, minCarat: e.target.value})} />
+            <input type="number" placeholder="Max" className="w-1/2 bg-white dark:bg-white/5 p-2 rounded-lg text-[10px] font-bold border border-black/5 outline-none" onChange={e => setFilters({...filters, maxCarat: e.target.value})} />
+          </div>
 
-            {showDetails && (
-              <div className="mt-6 space-y-6 animate-in fade-in duration-500">
-                <div className="grid grid-cols-4 gap-4">
-                   {['lab', 'length', 'width', 'height'].map(f => (
-                     <div key={f}>
-                        <label className="text-[9px] font-bold uppercase opacity-30 mb-1 block tracking-widest ml-1">{f}</label>
-                        <input className={inputClass} placeholder="0.00" onChange={e => setFormData({...formData, [f]: e.target.value})} />
-                     </div>
-                   ))}
+          <label className={sectionLabel}>3. Price Range ($)</label>
+          <div className="flex gap-2">
+            <input type="number" placeholder="Min" className="w-1/2 bg-white dark:bg-white/5 p-2 rounded-lg text-[10px] font-bold border border-black/5 outline-none" onChange={e => setFilters({...filters, minPrice: e.target.value})} />
+            <input type="number" placeholder="Max" className="w-1/2 bg-white dark:bg-white/5 p-2 rounded-lg text-[10px] font-bold border border-black/5 outline-none" onChange={e => setFilters({...filters, maxPrice: e.target.value})} />
+          </div>
+
+          <label className={sectionLabel}>4. Certificate</label>
+          <div className="grid grid-cols-3 gap-2">
+            {['NONE','IGI','GIA','GLI','HRD'].map(l => (
+              <button key={l} onClick={() => setFilters({...filters, lab: l})} className={filterBtn('lab', l)}>{l}</button>
+            ))}
+          </div>
+
+          <label className={sectionLabel}>5. Color</label>
+          <div className="grid grid-cols-4 gap-2">
+            {['NONE','D','E','F','G','H','I'].map(c => (
+              <button key={c} onClick={() => setFilters({...filters, color: c})} className={filterBtn('color', c)}>{c}</button>
+            ))}
+          </div>
+
+          <label className={sectionLabel}>6. Clarity</label>
+          <div className="grid grid-cols-3 gap-2">
+            {['NONE','IF','VVS1','VVS2','VS1','VS2','SI1'].map(c => (
+              <button key={c} onClick={() => setFilters({...filters, clarity: c})} className={filterBtn('clarity', c)}>{c}</button>
+            ))}
+          </div>
+
+          <label className={sectionLabel}>7. Cut Quality</label>
+          <select className="w-full bg-white dark:bg-white/5 p-2 rounded-lg text-[10px] font-bold border border-black/5 outline-none" onChange={e => setFilters({...filters, cut: e.target.value})}>
+            <option value="NONE">NONE</option>
+            <option value="EX">EXCELLENT</option>
+            <option value="VG">VERY GOOD</option>
+          </select>
+
+          <label className={sectionLabel}>8. Sort By</label>
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="w-full bg-white dark:bg-white/5 p-2 rounded-lg text-[10px] font-bold border border-black/5 outline-none italic">
+              <option value="price-low">Price: Low to High</option>
+              <option value="price-high">Price: High to Low</option>
+              <option value="carat-high">Carat: High to Low</option>
+          </select>
+
+          <div className="mt-12 pt-8 border-t border-black/5">
+            <h3 className="text-[10px] font-black opacity-30 uppercase tracking-[0.3em] mb-4 text-left">9. Layout</h3>
+            <div className="flex justify-between text-[8px] font-black opacity-40 mb-2 uppercase italic tracking-widest"><span>Wide</span><span>Dense</span></div>
+            <input type="range" min="3" max="6" step="1" value={density} onChange={(e) => setDensity(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-300 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+          </div>
+        </aside>
+
+        {/* MAIN GRID */}
+        <main className="flex-1">
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${density}, minmax(0, 1fr))`, gap: '1.5rem' }}>
+            {processedDiamonds.map((diamond) => (
+              <div key={diamond.id} className={`${darkMode ? 'bg-[#1C1C1E] border-white/5 shadow-2xl' : 'bg-white border-transparent shadow-sm hover:shadow-2xl'} group rounded-[2.5rem] border transition-all duration-700 overflow-hidden relative`}>
+                <div className="aspect-square bg-[#F2F2F7] dark:bg-black/40 flex items-center justify-center relative overflow-hidden italic">
+                    {diamond.image_url ? (
+                        <img src={diamond.image_url} alt={diamond.sku} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
+                    ) : (
+                        <span className="text-3xl opacity-5 font-black uppercase tracking-widest">GLI STOCK</span>
+                    )}
+                    <div className="absolute top-4 left-4 bg-white/90 dark:bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-lg border border-black/5 shadow-sm">
+                        <span className="text-[8px] font-black text-blue-600 uppercase tracking-widest">{diamond.lab}</span>
+                    </div>
+                    <button onClick={() => setFavorites(prev => prev.includes(diamond.id) ? prev.filter(i => i !== id) : [...prev, id])} 
+                      className="absolute top-4 right-4 p-2 opacity-0 group-hover:opacity-100 transition-all text-sm">❤️</button>
                 </div>
 
-                <div 
-                  onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-                  onDragLeave={() => setDragActive(false)}
-                  onDrop={(e) => { e.preventDefault(); setDragActive(false); if (e.dataTransfer.files[0]) setImageFile(e.dataTransfer.files[0]); }}
-                  className={`border rounded-2xl p-8 text-center transition-all border-dashed ${
-                    dragActive ? 'border-blue-500 bg-blue-50/10' : 'border-[#d1d1d6] dark:border-[#38383a]'
-                  }`}
-                >
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">
-                    {imageFile ? `✅ ${imageFile.name}` : "📸 Drag & Drop Stone Photo"}
-                  </p>
-                  <input type="file" id="photo" className="hidden" accept="image/*" onChange={e => e.target.files && setImageFile(e.target.files[0])} />
-                  <label htmlFor="photo" className="text-[9px] font-black text-blue-600 uppercase cursor-pointer block mt-2 hover:underline">Or Select File</label>
+                <div className="p-6">
+                    <div className="mb-4">
+                        <span className="text-[7px] font-black opacity-30 uppercase tracking-[0.2em]">{diamond.sku}</span>
+                        <h2 className={`font-black uppercase tracking-tight italic text-blue-900 dark:text-blue-400 ${density > 4 ? 'text-[10px]' : 'text-base'}`}>
+                            {diamond.carat}CT {diamond.shape}
+                        </h2>
+                    </div>
+
+                    {density < 6 && (
+                        <div className="grid grid-cols-3 gap-1.5 mb-5">
+                            {[
+                                {label: 'CLR', val: diamond.color},
+                                {label: 'CLA', val: diamond.clarity},
+                                {label: 'CUT', val: diamond.cut || 'EX'}
+                            ].map(spec => (
+                                <div key={spec.label} className="bg-[#F2F2F7] dark:bg-white/5 p-2 rounded-xl text-center border border-black/[0.03]">
+                                    <p className="text-[7px] font-black opacity-30 uppercase mb-0.5">{spec.label}</p>
+                                    <p className="text-[10px] font-black uppercase">{spec.val}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="flex justify-between items-center mt-auto border-t border-black/5 pt-4">
+                        <p className={`font-black text-slate-900 dark:text-white italic ${density > 5 ? 'text-[10px]' : 'text-base'}`}>${diamond.total_amount}</p>
+                        <button onClick={() => setCart(prev => prev.find(i => i.id === diamond.id) ? prev.filter(i => i.id !== diamond.id) : [...prev, diamond])}
+                            className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${cart.find(i => i.id === diamond.id) ? 'bg-green-500 text-white' : 'bg-blue-600 text-white active:scale-90 shadow-lg shadow-blue-500/10'}`}>
+                           {cart.find(i => i.id === diamond.id) ? 'Added' : 'Add'}
+                        </button>
+                    </div>
                 </div>
               </div>
-            )}
+            ))}
           </div>
 
-          <button disabled={loading} className="w-full bg-blue-600 text-white p-4 rounded-2xl font-black uppercase text-[11px] tracking-[0.25em] shadow-lg shadow-blue-500/20 active:scale-[0.97] transition-all">
-            {loading ? "Processing..." : "Save Stone to Inventory"}
-          </button>
-        </form>
-      </div>
-
-      {/* Excel Mini Panel */}
-      <div className={`mt-8 w-full max-w-2xl p-6 rounded-3xl border border-dashed ${darkMode ? 'border-[#38383a] bg-white/5' : 'border-slate-200 bg-white shadow-sm'} flex items-center justify-between`}>
-          <div className="flex items-center gap-4">
-            <span className="text-xl">📊</span>
-            <div className="text-left">
-              <h3 className="font-black text-[10px] uppercase tracking-widest">Bulk Import</h3>
-              <p className="text-[9px] opacity-40 italic">Upload excel spreadsheet</p>
-            </div>
-          </div>
-          <input type="file" id="excel" accept=".xlsx, .xls" className="hidden" onChange={handleFileUpload} />
-          <label htmlFor="excel" className="bg-slate-100 dark:bg-slate-800 px-5 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest cursor-pointer hover:bg-blue-600 hover:text-white transition-all">
-            Choose File
-          </label>
-      </div>
-
-      <div className="mt-12 text-center max-w-sm px-6">
-        <p className={`text-[11px] leading-relaxed italic font-medium opacity-30 ${darkMode ? 'text-white' : 'text-black'}`}>
-          "At GLI, we are dedicated to providing accurate and reliable diamond grading and certification services."
-        </p>
+          <footer className="mt-40 mb-20 text-center opacity-30 grayscale pointer-events-none">
+            <img src="/logo.png" alt="GLI Logo" className="w-20 mx-auto mb-6" />
+            <p className="text-[10px] font-medium tracking-widest uppercase italic max-w-xs mx-auto">"At GLI, we are dedicated to providing accurate and reliable diamond grading and services."</p>
+          </footer>
+        </main>
       </div>
     </div>
   )
