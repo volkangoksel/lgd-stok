@@ -12,17 +12,16 @@ export default function AdminLogin() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
+    console.log("Giriş deneniyor...");
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
-      alert("Error: " + error.message)
+      alert("Hata: " + error.message)
       setLoading(false)
     } else {
-      // BURASI DOĞRU ADRES: /admin sayfasına gitmeli
+      console.log("Başarılı! Panele gidiliyor...");
+      // BURAYA DİKKAT: Sadece /admin yazmalı
       router.push('/admin') 
     }
   }
@@ -33,25 +32,10 @@ export default function AdminLogin() {
         <img src="/logo.png" alt="GLI" className="w-24 mx-auto mb-10 object-contain" />
         <h1 className="text-xl font-black uppercase italic tracking-tighter mb-8 text-slate-800">Admin Access</h1>
         <form onSubmit={handleLogin} className="space-y-4">
-          <input 
-            type="email" 
-            placeholder="Email Address" 
-            required 
-            className="w-full p-4 rounded-2xl border border-slate-200 bg-[#F5F5F7] outline-none focus:border-blue-500 transition-all text-center font-medium text-sm" 
-            onChange={(e) => setEmail(e.target.value)} 
-          />
-          <input 
-            type="password" 
-            placeholder="Password" 
-            required 
-            className="w-full p-4 rounded-2xl border border-slate-200 bg-[#F5F5F7] outline-none focus:border-blue-500 transition-all text-center font-bold text-sm" 
-            onChange={(e) => setPassword(e.target.value)} 
-          />
-          <button 
-            disabled={loading} 
-            className="w-full bg-blue-600 text-white p-4 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] shadow-xl shadow-blue-500/20 active:scale-95 transition-all mt-4"
-          >
-            {loading ? "Verifying..." : "Unlock Inventory"}
+          <input type="email" placeholder="Email Address" required className="w-full p-4 rounded-2xl border border-slate-200 bg-[#F5F5F7] outline-none text-center font-medium" onChange={(e) => setEmail(e.target.value)} />
+          <input type="password" placeholder="Password" required className="w-full p-4 rounded-2xl border border-slate-200 bg-[#F5F5F7] outline-none text-center font-bold" onChange={(e) => setPassword(e.target.value)} />
+          <button disabled={loading} className="w-full bg-blue-600 text-white p-4 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] shadow-xl shadow-blue-500/20">
+            {loading ? "VERIFYING..." : "UNLOCK INVENTORY"}
           </button>
         </form>
       </div>
