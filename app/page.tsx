@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation'
 export default function Home() {
   const router = useRouter()
   useEffect(() => {
-    // Sadece ana domaindeysen kataloğa atar
+    // ANA ADRESE (domain.com) GİRİLDİĞİNDE KALOGA YÖNLENDİR
+    // ADMIN'E GİTTİĞİNDE GİRİŞ KONTROLÜ admin/page.tsx'de
     if (window.location.pathname === '/') {
       router.push('/katalog')
     }
   }, [router])
 
-  return null
+  return null // Boş component, sadece yönlendirme yapsın yeter
 }
