@@ -1,267 +1,63 @@
 "use client"
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
+import { LayoutGrid, List, ChevronDown, Check } from 'lucide-react'
 
 export default function KatalogPage() {
   const [diamonds, setDiamonds] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [darkMode, setDarkMode] = useState(false)
-  const [density, setDensity] = useState(3) // Masaüstü satır sayısı (3-6)
+  const [density, setDensity] = useState(3)
   const [cart, setCart] = useState<any[]>([])
-  const [favorites, setFavorites] = useState<string[]>([])
-  const [showMobileFilters, setShowMobileFilters] = useState(false)
-  
-  // Detaylı Filtre ve Sıralama State'leri
-  const [sortBy, setSortBy] = useState('priority-high') // Varsayılan: Admin Sıralaması
-  const [filters, setFilters] = useState<any>({
-    shape: 'NONE', minCarat: '', maxCarat: '',
-    minPrice: '', maxPrice: '', lab: 'NONE',
-    color: 'NONE', clarity: 'NONE', cut: 'NONE'
-  })
+  const [viewType, setViewType] = useState<'grid' | 'list'>('grid')
+  const [filters, setFilters] = useState<any>({ shape: 'NONE', lab: 'NONE' })
 
   useEffect(() => {
     async function getDiamonds() {
-      // Admin'in verdiği PRIORITY (RANK) değerine göre çekiyoruz
-      const { data, error } = await supabase
-        .from('diamonds')
-        .select('*')
-        .order('priority', { ascending: false }) 
-      
-      if (!error && data) setDiamonds(data)
+      const { data } = await supabase.from('diamonds').select('*').order('priority', { ascending: false })
+      if (data) setDiamonds(data)
       setLoading(false)
     }
     getDiamonds()
   }, [])
 
-  // Gelişmiş Filtreleme ve Sıralama Mantığı
-  const processedDiamonds = useMemo(() => {
-    let result = diamonds.filter(d => {
-      return (filters.shape === 'NONE' || d.shape === filters.shape) &&
-             (filters.lab === 'NONE' || d.lab === filters.lab) &&
-             (filters.color === 'NONE' || d.color === filters.color) &&
-             (filters.clarity === 'NONE' || d.clarity === filters.clarity) &&
-             (filters.cut === 'NONE' || d.cut === filters.cut) &&
-             (filters.minCarat === '' || d.carat >= parseFloat(filters.minCarat)) &&
-             (filters.maxCarat === '' || d.carat <= parseFloat(filters.maxCarat)) &&
-             (filters.minPrice === '' || d.total_amount >= parseFloat(filters.minPrice)) &&
-             (filters.maxPrice === '' || d.total_amount <= parseFloat(filters.maxPrice))
-    })
-
-    // Kullanıcının seçtiği Sort opsiyonları
-    if (sortBy === 'price-low') result.sort((a, b) => a.total_amount - b.total_amount)
-    if (sortBy === 'price-high') result.sort((a, b) => b.total_amount - a.total_amount)
-    if (sortBy === 'carat-low') result.sort((a, b) => a.carat - b.carat)
-    if (sortBy === 'carat-high') result.sort((a, b) => b.carat - a.carat)
-    if (sortBy === 'priority-high') result.sort((a, b) => b.priority - a.priority)
-    
-    return result
-  }, [diamonds, filters, sortBy])
-
-  const handleGetQuote = () => {
-    if (cart.length === 0) return alert("Please select stones first!")
-    const items = cart.map(d => `- ${d.sku} | ${d.carat}ct ${d.color}/${d.clarity}`).join('%0A')
-    const message = `Hello, I am interested in these items:%0A${items}`
-    window.open(`https://wa.me/905XXXXXXXXXX?text=${message}`, '_blank')
-  }
-
-  const sectionLabel = "text-[9px] font-black opacity-30 uppercase tracking-[0.2em] block mb-3 mt-8"
-  const filterBtnClass = (field: string, val: string) => `px-2 py-1.5 rounded-lg text-[9px] font-bold transition-all ${filters[field] === val ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' : 'bg-white dark:bg-white/5 opacity-60 border border-black/5 hover:opacity-100'}`
-
-  // Sidebar İçeriği (Desktop & Mobile Drawer için ortak)
-  const SidebarContent = () => (
-    <div className="text-left pb-20">
-      <h2 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.3em] italic mb-4">Refine Search</h2>
-      
-      <label className={sectionLabel}>1. Shape</label>
-      <div className="grid grid-cols-2 gap-2">
-        {['NONE','ROUND','PEAR','OVAL','EMERALD','RADIANT','PRINCESS','MARQUISE'].map(s => (
-          <button key={s} onClick={() => setFilters({...filters, shape: s})} className={filterBtnClass('shape', s)}>{s}</button>
-        ))}
-      </div>
-
-      <label className={sectionLabel}>2. Carat Range</label>
-      <div className="flex gap-2">
-        <input type="number" placeholder="Min" className="w-1/2 bg-white dark:bg-white/5 p-2.5 rounded-xl text-[10px] font-bold border border-black/5 outline-none" onChange={e => setFilters({...filters, minCarat: e.target.value})} />
-        <input type="number" placeholder="Max" className="w-1/2 bg-white dark:bg-white/5 p-2.5 rounded-xl text-[10px] font-bold border border-black/5 outline-none" onChange={e => setFilters({...filters, maxCarat: e.target.value})} />
-      </div>
-
-      <label className={sectionLabel}>3. Price Range ($)</label>
-      <div className="flex gap-2">
-        <input type="number" placeholder="Min" className="w-1/2 bg-white dark:bg-white/5 p-2.5 rounded-xl text-[10px] font-bold border border-black/5 outline-none" onChange={e => setFilters({...filters, minPrice: e.target.value})} />
-        <input type="number" placeholder="Max" className="w-1/2 bg-white dark:bg-white/5 p-2.5 rounded-xl text-[10px] font-bold border border-black/5 outline-none" onChange={e => setFilters({...filters, maxPrice: e.target.value})} />
-      </div>
-
-      <label className={sectionLabel}>4. Certificate</label>
-      <div className="grid grid-cols-3 gap-2">
-        {['NONE','IGI','GIA','GLI','HRD'].map(l => (
-          <button key={l} onClick={() => setFilters({...filters, lab: l})} className={filterBtnClass('lab', l)}>{l}</button>
-        ))}
-      </div>
-
-      <label className={sectionLabel}>5. Color</label>
-      <div className="grid grid-cols-4 gap-1.5">
-        {['NONE','D','E','F','G','H','I'].map(c => (
-          <button key={c} onClick={() => setFilters({...filters, color: c})} className={filterBtnClass('color', c)}>{c}</button>
-        ))}
-      </div>
-
-      <label className={sectionLabel}>6. Clarity</label>
-      <div className="grid grid-cols-3 gap-1.5">
-        {['NONE','IF','VVS1','VVS2','VS1','VS2','SI1'].map(c => (
-          <button key={c} onClick={() => setFilters({...filters, clarity: c})} className={filterBtnClass('clarity', c)}>{c}</button>
-        ))}
-      </div>
-
-      <label className={sectionLabel}>7. Cut Quality</label>
-      <select className="w-full bg-white dark:bg-white/5 p-3 rounded-xl text-[10px] font-bold border border-black/5 outline-none uppercase" onChange={e => setFilters({...filters, cut: e.target.value})}>
-        <option value="NONE">NONE</option>
-        <option value="EX">EXCELLENT</option>
-        <option value="VG">VERY GOOD</option>
-      </select>
-
-      <label className={sectionLabel}>8. Sort Results</label>
-      <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="w-full bg-white dark:bg-white/5 p-3 rounded-xl text-[10px] font-bold border border-black/5 outline-none italic uppercase">
-          <option value="priority-high">Featured (Rank)</option>
-          <option value="price-low">Price: Low to High</option>
-          <option value="price-high">Price: High to Low</option>
-          <option value="carat-low">Carat: Low to High</option>
-          <option value="carat-high">Carat: High to Low</option>
-      </select>
-
-      {/* DENSITY SLIDER (Sadece Masaüstünde Filtrelerin Altında) */}
-      <div className="mt-12 pt-8 border-t border-black/5 hidden lg:block">
-        <h3 className="text-[10px] font-black opacity-30 uppercase tracking-[0.3em] mb-4">9. Layout Density</h3>
-        <div className="flex justify-between text-[8px] font-black opacity-40 mb-2 uppercase italic tracking-widest">
-            <span>Wide (3)</span>
-            <span>Dense (6)</span>
-        </div>
-        <input 
-            type="range" min="3" max="6" step="1" 
-            value={density} 
-            onChange={(e) => setDensity(parseInt(e.target.value))}
-            className="w-full h-1 bg-slate-300 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600"
-        />
-      </div>
-    </div>
-  )
-
-  if (loading) return <div className="h-screen flex items-center justify-center font-black opacity-10 tracking-[0.5em] text-2xl italic">Luxury Loading...</div>
+  if (loading) return <div className="h-screen flex items-center justify-center font-black opacity-10 tracking-[0.5em] text-2xl uppercase">Opening GLI Vault...</div>
 
   return (
-    <div className={`${darkMode ? 'bg-black text-white' : 'bg-[#F5F5F7] text-[#1d1d1f]'} min-h-screen font-sans transition-colors duration-500`}>
-      
-      {/* NAVBAR */}
-      <nav className="p-4 md:p-6 flex justify-between items-center max-w-[1800px] mx-auto sticky top-0 z-50 backdrop-blur-xl bg-white/70 dark:bg-black/70 border-b border-black/5">
-        <img src="/logo.png" alt="GLI Logo" className="h-8 md:h-10 w-auto object-contain" />
-        <div className="flex items-center gap-3 md:gap-8">
-            <button onClick={() => setShowMobileFilters(true)} className="lg:hidden bg-white/50 dark:bg-white/10 px-3 py-1.5 rounded-full text-[9px] font-black uppercase">Filters</button>
+    <div className={`${darkMode ? 'bg-black text-white' : 'bg-[#F5F5F7] text-[#1D1D1F]'} min-h-screen font-sans antialiased text-left pb-20`}>
+      {/* Vitrin Navbar */}
+      <nav className="fixed top-0 w-full h-14 bg-white/80 dark:bg-black/80 backdrop-blur-xl border-b border-black/5 z-[100] flex items-center">
+        <div className="max-w-[1400px] mx-auto w-full px-6 flex justify-between items-center">
+          <img src="/logo.png" className="h-6 object-contain" />
+          <div className="flex items-center gap-8">
             <button onClick={() => setDarkMode(!darkMode)} className="text-[10px] font-black uppercase opacity-40 italic">{darkMode ? 'Light' : 'Dark'}</button>
-            <div className="flex items-center gap-4">
-                <div className="relative opacity-80 text-lg cursor-pointer">❤️ <span className="absolute -top-2 -right-2 bg-red-500 text-[8px] text-white w-4 h-4 rounded-full flex items-center justify-center font-bold">{favorites.length}</span></div>
-                <button onClick={handleGetQuote} className="bg-blue-600 text-white px-5 py-2 md:px-7 md:py-2.5 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-xl shadow-blue-500/20 active:scale-95 transition-all">
-                    Quote ({cart.length})
-                </button>
-            </div>
+            <button className="bg-[#0071E3] text-white px-6 py-2 rounded-full text-[10px] font-black shadow-lg">Bag ({cart.length})</button>
+          </div>
         </div>
       </nav>
 
-      <div className="max-w-[1800px] mx-auto flex px-4 md:px-8 py-6 md:py-10 gap-12">
-        
-        {/* SIDEBAR (Desktop) */}
-        <aside className="w-64 flex-shrink-0 hidden lg:block sticky top-32 h-[calc(100vh-160px)] overflow-y-auto pr-4 scrollbar-hide pb-20">
-          <SidebarContent />
+      <div className="max-w-[1400px] mx-auto flex pt-24 px-6 gap-12">
+        <aside className="w-64 hidden lg:block sticky top-24 h-fit text-left">
+           <h1 className="text-4xl font-black tracking-tighter italic uppercase mb-10">Store.</h1>
+           <p className="text-[10px] font-black opacity-30 uppercase tracking-[0.3em] mb-4 italic text-blue-600">Refine Search</p>
+           {/* Filtreleme butonlarını buraya ekleyebilirsin */}
         </aside>
 
-        {/* MOBILE FILTERS DRAWER */}
-        {showMobileFilters && (
-          <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm lg:hidden">
-            <div className="absolute right-0 top-0 h-full w-[85%] bg-white dark:bg-[#1C1C1E] p-8 shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-300">
-              <div className="flex justify-between items-center mb-8">
-                <span className="font-black text-sm uppercase italic">Inventory Filters</span>
-                <button onClick={() => setShowMobileFilters(false)} className="text-2xl text-slate-400">&times;</button>
-              </div>
-              <SidebarContent />
-              <button onClick={() => setShowMobileFilters(false)} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black mt-10 sticky bottom-0 shadow-2xl">Apply Filters</button>
-            </div>
-          </div>
-        )}
-
-        {/* MAIN LIST AREA */}
         <main className="flex-1">
-          <div 
-            className="grid gap-4 md:gap-6"
-            style={{ 
-                display: 'grid',
-                gridTemplateColumns: `repeat(var(--cols), minmax(0, 1fr))`,
-            } as any}
-          >
-            {/* Mobile First: 2 kolon varsayılan, lg ekranlarda density kadar kolon */}
-            <style jsx>{`
-              div { --cols: 2; }
-              @media (min-width: 1024px) { div { --cols: ${density}; } }
-            `}</style>
-
-            {processedDiamonds.map((diamond) => (
-              <div key={diamond.id} className={`${darkMode ? 'bg-[#1C1C1E] border-white/5 shadow-2xl' : 'bg-white border-transparent shadow-sm hover:shadow-2xl'} group rounded-[1.8rem] md:rounded-[2.5rem] border transition-all duration-700 overflow-hidden relative text-left`}>
-                
-                {/* Image & Badges */}
-                <div className="aspect-square bg-[#F2F2F7] dark:bg-black/40 flex items-center justify-center relative overflow-hidden italic">
-                    {diamond.image_url ? (
-                        <img src={diamond.image_url} alt={diamond.sku} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" />
-                    ) : (
-                        <span className="text-2xl md:text-3xl opacity-5 font-black uppercase tracking-widest leading-none">GLI STOCK</span>
-                    )}
-                    <div className="absolute top-3 left-3 md:top-4 md:left-4 bg-white/90 dark:bg-black/60 backdrop-blur-md px-2 py-0.5 md:px-2.5 md:py-1 rounded-lg border border-black/5 shadow-sm">
-                        <span className="text-[7px] md:text-[8px] font-black text-blue-600 uppercase tracking-widest">{diamond.lab}</span>
-                    </div>
-                    <button onClick={() => setFavorites(prev => prev.includes(diamond.id) ? prev.filter(i => i !== diamond.id) : [...prev, diamond.id])}
-                      className={`absolute top-3 right-3 md:top-4 md:right-4 p-2 rounded-full transition-all z-10 ${favorites.includes(diamond.id) ? 'bg-red-500 text-white shadow-lg' : 'bg-white/40 hover:bg-white text-slate-900 md:opacity-0 group-hover:opacity-100'}`}>
-                        ❤️
-                    </button>
+          <div className={viewType === 'grid' ? `grid gap-6 grid-cols-2 lg:grid-cols-${density}` : "flex flex-col gap-3"}>
+            {diamonds.map(diamond => (
+              <div key={diamond.id} className="bg-white dark:bg-[#1C1C1E] p-6 rounded-[2.5rem] shadow-sm hover:shadow-2xl transition-all border border-black/[0.02] text-left">
+                <div className="aspect-square bg-slate-50 dark:bg-black/40 rounded-2xl mb-6 flex items-center justify-center overflow-hidden italic font-black opacity-10">
+                    {diamond.image_url ? <img src={diamond.image_url} className="w-full h-full object-cover" /> : 'GLI'}
                 </div>
-
-                <div className="p-4 md:p-6">
-                    <div className="mb-2 md:mb-4">
-                        <span className="text-[6px] md:text-[7px] font-black opacity-30 uppercase tracking-[0.1em]">{diamond.sku}</span>
-                        <h2 className={`font-black uppercase tracking-tight italic text-blue-900 dark:text-blue-400 ${density > 4 ? 'text-[8px]' : 'text-xs md:text-base leading-tight'}`}>
-                            {diamond.carat}CT {diamond.shape}
-                        </h2>
-                    </div>
-
-                    {/* 4C Kutucukları (Density 6 hariç gösterilir) */}
-                    {density < 6 && (
-                        <div className="grid grid-cols-3 gap-1 mb-3 md:mb-5 animate-in fade-in zoom-in duration-500">
-                            {[
-                                {label: 'CLR', val: diamond.color},
-                                {label: 'CLA', val: diamond.clarity},
-                                {label: 'CUT', val: diamond.cut || 'EX'}
-                            ].map(spec => (
-                                <div key={spec.label} className="bg-[#F2F2F7] dark:bg-white/5 p-1 md:p-2 rounded-lg text-center border border-black/[0.03]">
-                                    <p className="text-[5px] md:text-[7px] font-black opacity-30 uppercase mb-0.5">{spec.label}</p>
-                                    <p className="text-[7px] md:text-[10px] font-black uppercase tracking-tighter">{spec.val}</p>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-
-                    <div className="flex justify-between items-center mt-auto border-t border-black/5 pt-3 md:pt-4">
-                        <p className={`font-black text-slate-900 dark:text-white italic ${density > 5 ? 'text-[9px]' : 'text-xs md:text-xl leading-none'}`}>${diamond.total_amount}</p>
-                        <button onClick={() => setCart(prev => prev.find(i => i.id === diamond.id) ? prev.filter(i => i.id !== diamond.id) : [...prev, diamond])}
-                            className={`px-3 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl text-[7px] md:text-[9px] font-black uppercase transition-all ${cart.find(i => i.id === diamond.id) ? 'bg-green-500 text-white shadow-inner' : 'bg-blue-600 text-white shadow-lg shadow-blue-500/10 active:scale-90 hover:bg-blue-500'}`}>
-                           {cart.find(i => i.id === diamond.id) ? 'Added' : 'Add'}
-                        </button>
-                    </div>
+                <h2 className="text-lg font-black leading-tight italic uppercase text-blue-900">{diamond.carat}CT {diamond.shape}</h2>
+                <div className="flex justify-between items-center mt-6 pt-5 border-t border-black/5">
+                   <span className="text-2xl font-black italic tracking-tighter">${diamond.total_amount}</span>
+                   <button onClick={() => setCart([...cart, diamond.id])} className="w-10 h-10 bg-blue-600 text-white rounded-2xl flex items-center justify-center font-bold shadow-lg shadow-blue-500/20">+</button>
                 </div>
               </div>
             ))}
           </div>
-
-          <footer className="mt-40 mb-20 text-center opacity-20 grayscale pointer-events-none">
-            <img src="/logo.png" alt="GLI Logo" className="w-16 mx-auto mb-6" />
-            <p className="text-[9px] font-medium tracking-[0.2em] uppercase italic max-w-xs mx-auto leading-relaxed px-4">
-                "At GLI, we are dedicated to providing accurate and reliable diamond grading and certification services."
-            </p>
-          </footer>
         </main>
       </div>
     </div>
