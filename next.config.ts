@@ -1,10 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
-    ignoreBuildErrors: true, // TypeScript hatalarını görmezden gel
+    ignoreBuildErrors: true,
   },
-  eslint: {
-    ignoreDuringBuilds: true, // Lint hatalarını görmezden gel
-  },
+  // eslint kısmını buradan sildik çünkü Next 16+ sürümlerinde bu şekilde kullanılmıyor.
 };
+
 export default nextConfig;
